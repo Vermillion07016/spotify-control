@@ -1,4 +1,5 @@
 use std::{collections::HashMap, fs, time::SystemTime};
+
 use reqwest::Url;
 use tiny_http::{Request, Response, Server};
 
@@ -59,7 +60,10 @@ async fn get_token() -> Result<Token, SpotifyError> {
         .append_pair("client_id", &client_id)
         .append_pair("response_type", "code")
         .append_pair("redirect_uri", CALLBACKURL)
-        .append_pair("scope", "user-modify-playback-state user-read-playback-state");
+        .append_pair(
+            "scope",
+            "user-modify-playback-state user-read-playback-state user-read-currently-playing",
+        );
 
     println!("click this url > {}", base_url.as_str());
 

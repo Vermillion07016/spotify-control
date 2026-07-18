@@ -150,11 +150,11 @@ pub async fn list_devices() -> Result<Vec<Device>, SpotifyError> {
 
 /// Şarkı adına göre arama yapar, en alakalı `limit` (1-50) sonucu döndürür.
 ///
-/// `market=from_token` parametresi kritik: bu olmadan Spotify aynı şarkının
-/// farklı pazarlardaki (bölgesel) kopyalarını ayrı sonuç olarak döndürebiliyor,
-/// bu da "aynı isimli şarkı birden fazla kez çıkıyor" hissi yaratıyor.
-/// `from_token` ile sadece kullanıcının hesabının pazarında geçerli olan
-/// tek bir sürüm döner.
+/// `market` sabit olarak "TR" veriliyor: bu olmadan Spotify aynı şarkının
+/// farklı pazarlardaki (bölgesel) kopyalarını ayrı sonuç olarak döndürebiliyor.
+/// `market=from_token` da aynı sorunu kullanıcının hesap ülkesine göre çözerdi
+/// ama ekstra `user-read-private` scope'u gerektiriyordu; sabit "TR" ekstra
+/// scope istemeden aynı faydayı sağlıyor. Farklı bir ülke için buradan değiştir.
 pub async fn search_tracks(query: &str, limit: u8) -> Result<Vec<Track>, SpotifyError> {
     let token = get_valid_token().await?;
     let limit = limit.clamp(1, 50);
@@ -166,7 +166,7 @@ pub async fn search_tracks(query: &str, limit: u8) -> Result<Vec<Track>, Spotify
             ("q", query),
             ("type", "track"),
             ("limit", &limit.to_string()),
-            ("market", "from_token"),
+            ("market", "TR"),
         ])
         .send()
         .await?;
@@ -186,7 +186,7 @@ pub async fn pause() -> Result<(), SpotifyError> {
     let res = client()
         .put(PLAYER_PAUSE)
         .bearer_auth(token.access_token)
-        .body(" ")
+        .body("")
         .send()
         .await?;
 
@@ -206,7 +206,7 @@ pub async fn play() -> Result<(), SpotifyError> {
         req = req.query(&[("device_id", id.as_str())]);
     }
 
-    let res = req.body(" ").send().await?;
+    let res = req.body("").send().await?;
     if !res.status().is_success() {
         return Err(map_error_response(res).await);
     }
@@ -240,7 +240,7 @@ pub async fn set_volume(volume_percent: u8) -> Result<(), SpotifyError> {
         .put(PLAYER_VOLUME)
         .bearer_auth(token.access_token)
         .query(&[("volume_percent", volume_percent.to_string())])
-        .body(" ")
+        .body("")
         .send()
         .await?;
 
@@ -258,7 +258,7 @@ pub async fn next_track() -> Result<(), SpotifyError> {
     let res = client()
         .post(PLAYER_NEXT)
         .bearer_auth(token.access_token)
-        .body(" ")
+        .body("")
         .send()
         .await?;
 
@@ -280,7 +280,7 @@ pub async fn previous_track() -> Result<(), SpotifyError> {
     let res = client()
         .post(PLAYER_PREVIOUS)
         .bearer_auth(token.access_token)
-        .body(" ")
+        .body("")
         .send()
         .await?;
 
@@ -301,7 +301,7 @@ pub async fn add_to_queue(track_uri: &str) -> Result<(), SpotifyError> {
         .post(PLAYER_QUEUE_ADD)
         .bearer_auth(token.access_token)
         .query(&[("uri", track_uri)])
-        .body(" ")
+        .body("")
         .send()
         .await?;
 
