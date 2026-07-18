@@ -1,4 +1,7 @@
-use spotify_control::{add_to_queue, current_status, list_devices, login, next_track, pause, play, play_track,player_status, previous_track, queue_status, search_tracks, set_volume, SpotifyError};
+use spotify_control::{
+    add_to_queue, current_status, list_devices, login, next_track, pause, play, play_track,
+    player_status, previous_track, queue_status, search_tracks, set_volume, SpotifyError,
+};
 
 /// Bir sonucu yazdırır; hata SpotifyError ise anlamlı Türkçe mesajı gösterir.
 fn report<T: std::fmt::Debug>(label: &str, result: Result<T, SpotifyError>) {
@@ -37,11 +40,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(tracks) => {
             for (i, t) in tracks.iter().enumerate() {
                 println!(
-                    "{}. {} - {} ({}) [{}]",
+                    "{}. {} [popularity: {:?}] [{}]",
                     i + 1,
-                    t.name,
-                    t.artist_names(),
-                    t.duration_formatted(),
+                    t.search_result_label(),
+                    t.popularity,
                     t.uri
                 );
             }

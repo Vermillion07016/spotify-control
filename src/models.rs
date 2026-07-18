@@ -17,6 +17,9 @@ pub struct Album {
     pub name: String,
     #[serde(default)]
     pub images: Vec<SpotifyImage>,
+    /// "YYYY", "YYYY-MM" ya da "YYYY-MM-DD" formatında olabilir (Spotify'ın
+    /// `release_date_precision` alanına göre değişir).
+    pub release_date: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -28,6 +31,11 @@ pub struct Track {
     #[serde(default)]
     pub artists: Vec<Artist>,
     pub album: Album,
+    /// 0-100 arası; sadece arama/full track objelerinde gelir. Aynı isimli
+    /// birden fazla sürüm arasında hangisinin "asıl"/en bilinen olduğunu
+    /// ayırt etmeye yardımcı olur (yüksek = daha popüler).
+    #[serde(default)]
+    pub popularity: Option<u8>,
 }
 
 impl Track {
@@ -44,6 +52,29 @@ impl Track {
     pub fn duration_formatted(&self) -> String {
         let total_secs = self.duration_ms / 1000;
         format!("{}:{:02}", total_secs / 60, total_secs % 60)
+    }
+
+    /// Albüm adından sadece yılı çıkarır (varsa), yoksa "?" döner.
+    pub fn release_year(&self) -> &str {
+        self.album
+            .release_date
+            .as_deref()
+            .and_then(|d| d.get(0..4))
+            .unwrap_or("?")
+    }
+
+    /// Discord'da arama sonucu listesinde göstermek için tek satırlık,
+    /// aynı isimli şarkıları birbirinden ayırt etmeye yardımcı bir etiket.
+    /// Örn: "Bohemian Rhapsody - Queen · A Night at the Opera (1975) · 4:59"
+    pub fn search_result_label(&self) -> String {
+        format!(
+            "{} - {} · {} ({}) · {}",
+            self.name,
+            self.artist_names(),
+            self.album.name,
+            self.release_year(),
+            self.duration_formatted()
+        )
     }
 }
 

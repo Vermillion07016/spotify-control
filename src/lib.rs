@@ -19,8 +19,6 @@ pub fn client() -> &'static Client {
     CLIENT.get_or_init(|| {
         Client::builder()
             .user_agent("spotify-control/0.1")
-            // Spotify boşta kalan bağlantıları kapatabiliyor; pool'un onu
-            // farkedemeden kullanmasını önlemek için idle timeout kısa tutuluyor.
             .pool_idle_timeout(Duration::from_secs(30))
             .pool_max_idle_per_host(4)
             .timeout(Duration::from_secs(15))
@@ -30,26 +28,18 @@ pub fn client() -> &'static Client {
     })
 }
 
-/// İlk girişi yapar (token.json yoksa tarayıcı akışını başlatır) ve token'ı
-/// bellekte saklar. Uygulama başlangıcında bir kez çağrılmalı.
 pub async fn login() -> Result<(), SpotifyError> {
     let token = login_spot().await?;
     *SAVED_TOKEN.write().await = Some(token);
     Ok(())
 }
 
-/// Geçerli bir access token döndürür; süresi dolmuşsa yeniler.
-///
-/// Double-checked locking: önce okuma kilidiyle hızlıca kontrol eder, sadece
-/// süresi dolmuşsa yazma kilidi alır ve TEKRAR kontrol eder — böylece aynı
-/// anda birden fazla Discord komutu tetiklenirse Spotify'a gereksiz/çakışan
-/// refresh istekleri gitmez.
 async fn get_valid_token() -> Result<Token, SpotifyError> {
     {
         let guard = SAVED_TOKEN.read().await;
         match guard.as_ref() {
             Some(t) if !t.is_expired() => return Ok(t.clone()),
-            Some(_) => {} // süresi dolmuş, aşağıda yenilenecek
+            Some(_) => {}
             None => return Err(SpotifyError::NeedsLogin),
         }
     }
@@ -58,7 +48,7 @@ async fn get_valid_token() -> Result<Token, SpotifyError> {
     let current = guard.as_ref().ok_or(SpotifyError::NeedsLogin)?.clone();
 
     if !current.is_expired() {
-        return Ok(current); // başka bir görev bizden önce yenilemiş
+        return Ok(current);
     }
 
     let refresh = current.refresh_token.clone().ok_or(SpotifyError::NeedsLogin)?;
@@ -67,7 +57,6 @@ async fn get_valid_token() -> Result<Token, SpotifyError> {
     Ok(refreshed)
 }
 
-/// Aktif cihazı, yoksa listedeki ilk cihazı döndürür (device_id).
 async fn active_or_first_device_id() -> Result<Option<String>, SpotifyError> {
     let devices = list_devices().await?;
     Ok(devices
@@ -91,7 +80,6 @@ pub async fn current_status() -> Result<Option<SpotifyPlayback>, SpotifyError> {
     if !res.status().is_success() {
         return Err(map_error_response(res).await);
     }
-    // Aktif oynatma yoksa Spotify 204 No Content (boş body) döner.
     if res.status() == reqwest::StatusCode::NO_CONTENT {
         return Ok(None);
     }
@@ -161,6 +149,12 @@ pub async fn list_devices() -> Result<Vec<Device>, SpotifyError> {
 }
 
 /// Şarkı adına göre arama yapar, en alakalı `limit` (1-50) sonucu döndürür.
+///
+/// `market=from_token` parametresi kritik: bu olmadan Spotify aynı şarkının
+/// farklı pazarlardaki (bölgesel) kopyalarını ayrı sonuç olarak döndürebiliyor,
+/// bu da "aynı isimli şarkı birden fazla kez çıkıyor" hissi yaratıyor.
+/// `from_token` ile sadece kullanıcının hesabının pazarında geçerli olan
+/// tek bir sürüm döner.
 pub async fn search_tracks(query: &str, limit: u8) -> Result<Vec<Track>, SpotifyError> {
     let token = get_valid_token().await?;
     let limit = limit.clamp(1, 50);
@@ -172,6 +166,7 @@ pub async fn search_tracks(query: &str, limit: u8) -> Result<Vec<Track>, Spotify
             ("q", query),
             ("type", "track"),
             ("limit", &limit.to_string()),
+            ("market", "from_token"),
         ])
         .send()
         .await?;
@@ -191,7 +186,7 @@ pub async fn pause() -> Result<(), SpotifyError> {
     let res = client()
         .put(PLAYER_PAUSE)
         .bearer_auth(token.access_token)
-        .body(" ") // Spotify body'siz PUT/POST'larda bile Content-Length ister.
+        .body("")
         .send()
         .await?;
 
@@ -211,7 +206,7 @@ pub async fn play() -> Result<(), SpotifyError> {
         req = req.query(&[("device_id", id.as_str())]);
     }
 
-    let res = req.body(" ").send().await?;
+    let res = req.body("").send().await?;
     if !res.status().is_success() {
         return Err(map_error_response(res).await);
     }
@@ -245,7 +240,7 @@ pub async fn set_volume(volume_percent: u8) -> Result<(), SpotifyError> {
         .put(PLAYER_VOLUME)
         .bearer_auth(token.access_token)
         .query(&[("volume_percent", volume_percent.to_string())])
-        .body(" ")
+        .body("")
         .send()
         .await?;
 
@@ -263,14 +258,20 @@ pub async fn next_track() -> Result<(), SpotifyError> {
     let res = client()
         .post(PLAYER_NEXT)
         .bearer_auth(token.access_token)
-        .body(" ")
+        .body("")
         .send()
         .await?;
 
     if !res.status().is_success() {
         return Err(map_error_response(res).await);
     }
-    Ok(())
+
+    // Spotify /next ile track'i değiştirir ama ÇALMA DURUMUNU değiştirmez —
+    // cihaz o an duraklatılmışsa track değişse bile duraklatılmış kalır.
+    // Spotify'ın track değişikliğini backend'de işlemesi için kısa bir bekleme
+    // sonrası açıkça resume ediyoruz.
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    play().await
 }
 
 pub async fn previous_track() -> Result<(), SpotifyError> {
@@ -279,14 +280,17 @@ pub async fn previous_track() -> Result<(), SpotifyError> {
     let res = client()
         .post(PLAYER_PREVIOUS)
         .bearer_auth(token.access_token)
-        .body(" ")
+        .body("")
         .send()
         .await?;
 
     if !res.status().is_success() {
         return Err(map_error_response(res).await);
     }
-    Ok(())
+
+    // Aynı sebep: /previous da mevcut çalma durumunu miras alır, resume gerekiyor.
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    play().await
 }
 
 /// `track_uri` formatı: "spotify:track:XXXXXXXXXXXXXXXXXXXXXX"
@@ -297,7 +301,7 @@ pub async fn add_to_queue(track_uri: &str) -> Result<(), SpotifyError> {
         .post(PLAYER_QUEUE_ADD)
         .bearer_auth(token.access_token)
         .query(&[("uri", track_uri)])
-        .body(" ")
+        .body("")
         .send()
         .await?;
 
