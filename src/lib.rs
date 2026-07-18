@@ -186,7 +186,7 @@ pub async fn pause() -> Result<(), SpotifyError> {
     let res = client()
         .put(PLAYER_PAUSE)
         .bearer_auth(token.access_token)
-        .body("")
+        .body(" ")
         .send()
         .await?;
 
@@ -206,7 +206,7 @@ pub async fn play() -> Result<(), SpotifyError> {
         req = req.query(&[("device_id", id.as_str())]);
     }
 
-    let res = req.body("").send().await?;
+    let res = req.body(" ").send().await?;
     if !res.status().is_success() {
         return Err(map_error_response(res).await);
     }
@@ -240,7 +240,7 @@ pub async fn set_volume(volume_percent: u8) -> Result<(), SpotifyError> {
         .put(PLAYER_VOLUME)
         .bearer_auth(token.access_token)
         .query(&[("volume_percent", volume_percent.to_string())])
-        .body("")
+        .body(" ")
         .send()
         .await?;
 
@@ -258,7 +258,7 @@ pub async fn next_track() -> Result<(), SpotifyError> {
     let res = client()
         .post(PLAYER_NEXT)
         .bearer_auth(token.access_token)
-        .body("")
+        .body(" ")
         .send()
         .await?;
 
@@ -280,7 +280,7 @@ pub async fn previous_track() -> Result<(), SpotifyError> {
     let res = client()
         .post(PLAYER_PREVIOUS)
         .bearer_auth(token.access_token)
-        .body("")
+        .body(" ")
         .send()
         .await?;
 
@@ -301,7 +301,7 @@ pub async fn add_to_queue(track_uri: &str) -> Result<(), SpotifyError> {
         .post(PLAYER_QUEUE_ADD)
         .bearer_auth(token.access_token)
         .query(&[("uri", track_uri)])
-        .body("")
+        .body(" ")
         .send()
         .await?;
 
