@@ -266,12 +266,7 @@ pub async fn next_track() -> Result<(), SpotifyError> {
         return Err(map_error_response(res).await);
     }
 
-    // Spotify /next ile track'i değiştirir ama ÇALMA DURUMUNU değiştirmez —
-    // cihaz o an duraklatılmışsa track değişse bile duraklatılmış kalır.
-    // Spotify'ın track değişikliğini backend'de işlemesi için kısa bir bekleme
-    // sonrası açıkça resume ediyoruz.
-    tokio::time::sleep(Duration::from_millis(250)).await;
-    play().await
+    Ok(())
 }
 
 pub async fn previous_track() -> Result<(), SpotifyError> {
@@ -288,7 +283,6 @@ pub async fn previous_track() -> Result<(), SpotifyError> {
         return Err(map_error_response(res).await);
     }
 
-    // Aynı sebep: /previous da mevcut çalma durumunu miras alır, resume gerekiyor.
     tokio::time::sleep(Duration::from_millis(250)).await;
     play().await
 }
