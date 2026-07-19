@@ -57,13 +57,17 @@ async fn get_valid_token() -> Result<Token, SpotifyError> {
     Ok(refreshed)
 }
 
+/// Aktif bir cihaz zaten varsa device_id vermeye GEREK YOK (mevcut aktif
+/// cihaza komut otomatik gider); sadece hiç aktif cihaz yoksa, listedeki ilk
+/// cihazı hedef olarak döndürüyoruz. Zaten aktif olan bir cihaz için bile
+/// explicit device_id göndermek bazı Spotify istemcilerinde gereksiz bir
+/// "transfer playback" gibi davranıp context/pozisyonu bozabiliyor.
 async fn active_or_first_device_id() -> Result<Option<String>, SpotifyError> {
     let devices = list_devices().await?;
-    Ok(devices
-        .iter()
-        .find(|d| d.is_active)
-        .or_else(|| devices.first())
-        .and_then(|d| d.id.clone()))
+    if devices.iter().any(|d| d.is_active) {
+        return Ok(None);
+    }
+    Ok(devices.first().and_then(|d| d.id.clone()))
 }
 
 // ---------- GET ----------
@@ -214,6 +218,14 @@ pub async fn play() -> Result<(), SpotifyError> {
 }
 
 /// Belirli bir track'i (`spotify:track:ID` formatında URI) direkt çalmaya başlar.
+///
+/// DİKKAT: Bu fonksiyon Spotify'a context olarak SADECE bu tek track'i
+/// (`"uris": [track_uri]`) verir. Bu, kullanıcının o an dinlediği
+/// albüm/playlist/kuyruğu tamamen DEĞİŞTİRİR — sonrasında next_track()/
+/// previous_track() çağrıları artık kullanıcının asıl kuyruğunu değil, bu tek
+/// şarkılık geçici context'i görür (previous hep aynı şarkıya döner, next'in
+/// gidecek yeri kalmaz). Discord bot'ta "arama sonucundan şarkı çal" gibi bir
+/// komutta bunun yerine `play_track_preserving_queue` kullanman önerilir.
 pub async fn play_track(track_uri: &str) -> Result<(), SpotifyError> {
     let token = get_valid_token().await?;
     let device_id = active_or_first_device_id().await?;
@@ -230,6 +242,23 @@ pub async fn play_track(track_uri: &str) -> Result<(), SpotifyError> {
         return Err(map_error_response(res).await);
     }
     Ok(())
+}
+
+/// Belirli bir track'i, kullanıcının MEVCUT context'ini (albüm/playlist/kuyruk)
+/// bozmadan çalar: track'i kuyruğun sonuna ekleyip oraya atlar.
+///
+/// `play_track()`'in aksine context'i değiştirmediği için, sonrasında
+/// next_track()/previous_track() kullanıcının asıl kuyruğuyla doğru
+/// çalışmaya devam eder. Discord bot'ta "arama yap → seç → çal" akışında bu
+/// fonksiyonu kullan.
+///
+/// Not: Spotify'ın kuyruk ekleme endpoint'i şarkıyı kuyruğun SONUNA ekler
+/// (öne değil). Kuyrukta başka bekleyen şarkı yoksa (çoğu tekli bot kullanım
+/// senaryosunda öyledir) tek next_track() çağrısı yeterli olur; kuyrukta
+/// başka şarkılar varsa önce onlar çalınır.
+pub async fn play_track_preserving_queue(track_uri: &str) -> Result<(), SpotifyError> {
+    add_to_queue(track_uri).await?;
+    next_track().await
 }
 
 pub async fn set_volume(volume_percent: u8) -> Result<(), SpotifyError> {
@@ -266,7 +295,12 @@ pub async fn next_track() -> Result<(), SpotifyError> {
         return Err(map_error_response(res).await);
     }
 
-    Ok(())
+    // Spotify /next ile track'i değiştirir ama ÇALMA DURUMUNU değiştirmez —
+    // cihaz o an duraklatılmışsa track değişse bile duraklatılmış kalır.
+    // Spotify'ın track değişikliğini backend'de işlemesi için kısa bir bekleme
+    // sonrası açıkça resume ediyoruz.
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    play().await
 }
 
 pub async fn previous_track() -> Result<(), SpotifyError> {
@@ -283,6 +317,7 @@ pub async fn previous_track() -> Result<(), SpotifyError> {
         return Err(map_error_response(res).await);
     }
 
+    // Aynı sebep: /previous da mevcut çalma durumunu miras alır, resume gerekiyor.
     tokio::time::sleep(Duration::from_millis(250)).await;
     play().await
 }
